@@ -1,5 +1,5 @@
 // Schermate di consultazione: home, ambito, sezione, ricerca, dubbi e impostazioni.
-import { el, put, inlineNodes, sourcesLine, field, armButton, toast } from './ui.js';
+import { el, put, inlineNodes, sourcesLine, field, armButton, toast, secretForm } from './ui.js';
 import { childrenOf, countDescendants, breadcrumb, getState, setState } from './doc.js';
 import { search } from './search.js';
 import { entryText } from './entries.js';
@@ -342,7 +342,7 @@ export function renderSettings(view) {
     },
   }, 'Crea il link');
 
-  const tokenField = el('input', { id: 'set-token', type: 'password', autocomplete: 'off' });
+  const tokenField = el('input', { id: 'set-token', type: 'text', class: 'secret', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' });
   const tokenErr = el('div', { class: 'err', hidden: true, role: 'alert' });
   const tokenGo = el('button', {
     type: 'button',
@@ -375,7 +375,7 @@ export function renderSettings(view) {
     el('section', { class: 'card' },
       el('h2', {}, 'Collega un altro dispositivo'),
       el('p', { class: 'note' }, 'Il link è cifrato e si apre solo con la tua password. Mandalo a te stesso e aprilo sull\'altro dispositivo.'),
-      field('La tua password', linkPass), linkErr, linkGo, linkOut, copyBtn),
+      secretForm(field('La tua password', linkPass), linkErr, linkGo, linkOut, copyBtn)),
     el('section', { class: 'card' }, el('h2', {}, 'Aspetto'), field('Tema', theme)),
     el('section', { class: 'card' },
       el('h2', {}, 'Copie di sicurezza'),

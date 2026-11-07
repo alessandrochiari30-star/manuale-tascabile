@@ -212,6 +212,7 @@ details > summary { padding: 12px 13px; font-weight: 600; font-size: 15px; curso
   font-size: 16px;
 }
 textarea { min-height: 96px; resize: vertical; }
+.secret { -webkit-text-security: disc; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
 .card h2 { margin-top: 0; }
 .err { color: var(--err); background: var(--err-bg); border-radius: 8px; padding: 8px 10px; font-size: 14px; margin: 8px 0; }

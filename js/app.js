@@ -73,13 +73,19 @@ function runSearch() {
 }
 
 input.addEventListener('input', () => {
+  // Il browser può riempire da solo questo campo credendolo un nome utente: conta solo chi ci sta scrivendo.
+  if (document.activeElement !== input) {
+    input.value = parseHash().parts[0] === 'cerca' ? (parseHash().params.get('q') ?? '') : '';
+    return;
+  }
   // I risultati vecchi spariscono subito: un tocco non finisce mai su una voce superata.
   if (input.value.trim()) clear(view);
   clearTimeout(searchTimer);
   searchTimer = setTimeout(runSearch, 60);
 });
-input.addEventListener('keydown', event => {
-  if (event.key === 'Enter') input.blur();
+document.getElementById('search-form').addEventListener('submit', event => {
+  event.preventDefault();
+  input.blur();
 });
 
 // --- navigazione ---

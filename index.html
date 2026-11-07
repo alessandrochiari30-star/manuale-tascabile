@@ -22,9 +22,9 @@
     <a id="title" href="#/">Manuale</a>
     <button type="button" id="settings" class="icon" aria-label="Impostazioni">⚙</button>
   </div>
-  <div class="searchbar">
-    <input type="search" id="q" placeholder="Cosa non ricordi?" aria-label="Cerca nel manuale" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
-  </div>
+  <form id="search-form" class="searchbar" role="search" autocomplete="off">
+    <input type="search" id="q" name="ricerca" placeholder="Cosa non ricordi?" aria-label="Cerca nel manuale" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+  </form>
 </header>
 <div id="banner" role="alert" hidden></div>
 <main id="view"></main>

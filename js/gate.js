@@ -1,5 +1,5 @@
 // Schermate prima dell'accesso: benvenuto, prima configurazione, collegamento e sblocco.
-import { el, put, clear, field } from './ui.js';
+import { el, put, clear, field, secretForm } from './ui.js';
 import { checkPassword, hasLink, WrongPassword, BadFile } from './vault.js';
 import { firstSetup, connectWithLink, unlock, forgetDevice } from './session.js';
 import { armButton } from './ui.js';
@@ -64,7 +64,7 @@ export function renderWelcome(view, onReady) {
   const pass2 = passwordInput('s-pass2', 'new-password');
   const owner = el('input', { id: 's-owner', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' });
   const repo = el('input', { id: 's-repo', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' });
-  const token = el('input', { id: 's-token', type: 'password', autocomplete: 'off', spellcheck: 'false' });
+  const token = el('input', { id: 's-token', type: 'text', class: 'secret', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' });
   const setupErr = errorBox();
   const setupGo = el('button', { type: 'button', id: 's-go', class: 'btn primary' }, 'Cifra e carica');
   setupGo.addEventListener('click', busy(setupGo, 'Cifratura…', async () => {
@@ -89,21 +89,23 @@ export function renderWelcome(view, onReady) {
     el('section', { class: 'card' },
       el('h2', {}, 'Collega questo dispositivo'),
       el('p', { class: 'note' }, 'Su un dispositivo già configurato apri Impostazioni, crea il link e incollalo qui.'),
-      field('Link di collegamento', linkField),
-      field('Password', linkPass),
-      linkErr,
-      linkGo),
+      secretForm(
+        field('Link di collegamento', linkField),
+        field('Password', linkPass),
+        linkErr,
+        linkGo)),
     el('section', { class: 'card' },
       el('h2', {}, 'Prima configurazione'),
       el('p', { class: 'note' }, 'Da fare una sola volta, dal PC. Il file resta sul PC: online arriva solo il risultato cifrato.'),
-      field('File del manuale', file),
-      field('Scegli una password', pass, 'Almeno 12 caratteri. Se la dimentichi nessuno può recuperarla.'),
-      field('Ripeti la password', pass2),
-      field('Utente GitHub', owner),
-      field('Repository privato', repo),
-      field('Chiave di accesso', token, 'Limitata a quel solo repository, con permesso Contents in scrittura.'),
-      setupErr,
-      setupGo)));
+      secretForm(
+        field('File del manuale', file),
+        field('Scegli una password', pass, 'Almeno 12 caratteri. Se la dimentichi nessuno può recuperarla.'),
+        field('Ripeti la password', pass2),
+        field('Utente GitHub', owner),
+        field('Repository privato', repo),
+        field('Chiave di accesso', token, 'Limitata a quel solo repository, con permesso Contents in scrittura.'),
+        setupErr,
+        setupGo))));
 }
 
 export function renderUnlock(view, onReady) {
@@ -128,7 +130,7 @@ export function renderUnlock(view, onReady) {
   put(view, el('div', { class: 'gate' },
     el('h1', {}, 'Manuale'),
     el('p', { class: 'sub' }, 'Inserisci la password per aprire i contenuti.'),
-    el('section', { class: 'card' }, field('Password', pass), err, go),
+    el('section', { class: 'card' }, secretForm(field('Password', pass), err, go)),
     reset));
   pass.focus();
 }

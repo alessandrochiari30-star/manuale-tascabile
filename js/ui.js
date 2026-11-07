@@ -63,6 +63,14 @@ export function field(label, control, hint) {
   return el('label', { class: 'field' }, el('span', {}, label), control, hint ? el('small', {}, hint) : null);
 }
 
+// Modulo per i campi password. Il nome utente fisso impedisce al browser di usare come utente
+// un altro campo della pagina, per esempio la ricerca.
+export function secretForm(...children) {
+  return el('form', { onsubmit: event => event.preventDefault() },
+    el('input', { type: 'text', autocomplete: 'username', value: 'Manuale', hidden: true, tabindex: '-1', 'aria-hidden': 'true' }),
+    children);
+}
+
 // Azione distruttiva in due tocchi, senza finestre di sistema che su telefono si perdono.
 export function armButton(button, confirmLabel, onConfirm, ms = 6000) {
   const original = button.textContent;
