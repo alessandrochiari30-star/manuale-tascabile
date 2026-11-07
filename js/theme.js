@@ -5,3 +5,6 @@ export function resolveTheme(stored, systemDark) {
   if (stored === 'auto') return systemDark ? 'dark' : 'light';
   return FIXED.has(stored) ? stored : 'dark';
 }
+
+// Colore della barra di sistema e dello sfondo d'avvio: uguale allo sfondo dell'app.
+export const THEME_COLOR = { dark: '#000000', light: '#F4F4F5' };

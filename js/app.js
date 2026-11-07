@@ -2,7 +2,7 @@
 import { clear } from './ui.js';
 import { S, on, autoUnlock, localState, syncNow } from './session.js';
 import { renderWelcome, renderUnlock } from './gate.js';
-import { renderHome, renderAmbito, renderSection, renderSearch, renderDoubts, renderSettings, renderMissing, statusText, applyTheme } from './views.js';
+import { renderHome, renderAmbito, renderGroup, renderSection, renderSearch, renderDoubts, renderSettings, renderMissing, statusText, applyTheme } from './views.js';
 import { renderCalc, renderProposal, renderQuiz } from './views-tools.js';
 import { hasLink } from './vault.js';
 import { icon } from './icons.js';
@@ -90,6 +90,7 @@ function render({ keepScroll = false } = {}) {
   switch (parts[0]) {
     case undefined: renderHome(view); break;
     case 'a': renderAmbito(view, parts[1]); break;
+    case 'g': renderGroup(view, parts[1], params.get('a')); break;
     case 's': renderSection(view, parts[1], params.get('f')); break;
     case 'cerca': renderSearch(view, params.get('q') ?? '', params.get('t') ?? 'tutto'); break;
     case 'dubbi': renderDoubts(view); break;

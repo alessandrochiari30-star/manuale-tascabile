@@ -7,7 +7,8 @@ import { snippet } from './forms.js';
 import { plainText } from './inline.js';
 import { S, commit, syncNow, lock, deviceLink, updateToken, forgetDevice, sealedExport } from './session.js';
 import { WrongPassword } from './vault.js';
-import { resolveTheme } from './theme.js';
+import { resolveTheme, THEME_COLOR } from './theme.js';
+import { cleanGroups, groupHits, countHits } from './groups.js';
 import { stagger } from './motion.js';
 import { icon } from './icons.js';
 import { addRecent } from './recent.js';
@@ -43,10 +44,12 @@ export function renderHome(view) {
   }
   const doubts = doubtNodes().length;
   const recent = addRecent(getState(S.doc, 'recenti'), '');
+  const chips = groupChips(null);
   put(view,
     recent.length ? el('div', { class: 'recents' }, recent.map(query => el('a', { class: 'recent', href: `#/cerca?q=${encodeURIComponent(query)}` }, icon('clock', 14), query))) : null,
     el('p', { class: 'label' }, 'Ambiti'),
     el('div', { class: 'grid' }, tiles),
+    chips ? [el('p', { class: 'label' }, 'Per cliente e canale'), chips] : null,
     doubts ? el('a', { id: 'home-dubbi', href: '#/dubbi' },
       icon('alert'),
       el('span', { class: 'grow' }, el('b', {}, `${doubts} dubbi da verificare`), el('span', {}, 'Prima di dirli a un cliente')),
@@ -73,13 +76,85 @@ export function renderAmbito(view, id) {
     location.replace(`#/s/${encodeURIComponent(kids[0].id)}`);
     return;
   }
-  put(view, el('h1', {}, node.t), node.sub ? el('p', { class: 'sub' }, node.sub) : null);
+  // Tre blocchi compatti: strumenti, argomenti, e in fondo ciò che serve per ripassare.
+  const blocks = [['Strumenti', []], ['Argomenti', []], ['Numeri, procedure e domande', []]];
   for (const kid of kids) {
     const href = kid.ty === 'link' ? `#/${kid.route}` : `#/s/${encodeURIComponent(kid.id)}`;
-    put(view, el('a', { class: 'row' + (kid.ty === 'link' ? ' tool' : ''), href },
+    const where = kid.ty === 'link' ? 0 : isQuick(kid) ? 2 : 1;
+    blocks[where][1].push(el('a', { class: 'row' + (kid.ty === 'link' ? ' tool' : ''), href },
       el('div', { class: 'grow' }, el('b', {}, kid.t), kid.sub ? el('span', {}, kid.sub) : null),
       icon('go', 18)));
   }
+  const chips = groupChips(id);
+  put(view,
+    el('h1', {}, node.t),
+    node.sub ? el('p', { class: 'sub' }, node.sub) : null,
+    chips ? [el('p', { class: 'label' }, 'Per cliente e canale'), chips] : null,
+    blocks.filter(([, rows]) => rows.length).map(([label, rows]) => [el('p', { class: 'label' }, label), el('div', { class: 'list' }, rows)]));
+}
+
+// Sezione fatta solo di numeri, procedure o domande, oppure un indice da consultare.
+function isQuick(sec) {
+  const kids = childrenOf(S.tree, sec.id);
+  if (!kids.length) return false;
+  if (kids.length === 1 && kids[0].ty === 'tab' && Array.isArray(kids[0].cerca)) return true;
+  const ty = kids[0].ty;
+  return (ty === 'num' || ty === 'qa' || ty === 'proc') && kids.every(kid => kid.ty === ty);
+}
+
+// --- gruppi per cliente e canale ---
+let hitCache = { tree: null, map: new Map() };
+const groupsShown = new Set();
+const allGroups = () => cleanGroups(S.doc.meta?.gruppi);
+
+function hitsOf(group, scopeId) {
+  if (hitCache.tree !== S.tree) hitCache = { tree: S.tree, map: new Map() };
+  const key = group.id + '|' + (scopeId ?? '');
+  if (!hitCache.map.has(key)) hitCache.map.set(key, groupHits(S.tree, group, scopeId));
+  return hitCache.map.get(key);
+}
+
+const groupHref = (gid, scopeId) => `#/g/${encodeURIComponent(gid)}` + (scopeId ? `?a=${encodeURIComponent(scopeId)}` : '');
+
+function groupChips(scopeId, current = null) {
+  const chips = [];
+  for (const group of allGroups()) {
+    const count = countHits(hitsOf(group, scopeId));
+    if (!count) continue;
+    chips.push(el('a', { class: 'facet', href: groupHref(group.id, scopeId), 'aria-current': group.id === current ? 'true' : 'false' },
+      group.t, el('span', {}, String(count))));
+  }
+  return chips.length ? el('div', { class: current ? 'facets' : 'gchips' }, chips) : null;
+}
+
+export function renderGroup(view, gid, scopeId) {
+  const group = allGroups().find(g => g.id === gid);
+  const scope = scopeId ? S.doc.nodes[scopeId] : null;
+  if (!group || (scopeId && (!scope || !S.tree.visible.has(scopeId)))) return renderMissing(view);
+  const hits = hitsOf(group, scopeId || null);
+  const total = countHits(hits);
+  // Alla prima visita le voci trovate si aprono: dentro c'è proprio ciò che riguarda il gruppo.
+  const opening = !groupsShown.has(gid + '|' + (scopeId ?? ''));
+  groupsShown.add(gid + '|' + (scopeId ?? ''));
+  put(view,
+    el('p', { class: 'eyebrow' }, scope ? scope.t : 'Tutto il manuale'),
+    el('h1', {}, group.t),
+    el('p', { class: 'sub' }, total
+      ? `${total} ${total === 1 ? 'voce' : 'voci'} in ${hits.length} ${hits.length === 1 ? 'sezione' : 'sezioni'}`
+      : 'Nessuna voce.'),
+    groupChips(scopeId || null, gid));
+  let ambito = null;
+  for (const hit of hits) {
+    if (!scopeId && hit.ambito !== ambito) {
+      ambito = hit.ambito;
+      put(view, el('h2', { class: 'grp-amb' }, ambito?.t ?? ''));
+    }
+    if (opening) for (const item of hit.items) if (childrenOf(S.tree, item.id).length) expanded.add(item.id);
+    put(view,
+      el('a', { class: 'label grp-sec', href: `#/s/${encodeURIComponent(hit.section.id)}` }, el('span', {}, hit.section.t), icon('go', 14)),
+      el('div', { class: 'cards' }, hit.items.map(item => renderAny(item, null, 0))));
+  }
+  if (scopeId) put(view, el('a', { class: 'btn grp-all', href: groupHref(gid, null) }, 'Vedi in tutto il manuale'));
 }
 
 // --- sezione ---
@@ -433,6 +508,33 @@ export function renderSettings(view) {
   }, el('option', { value: 'dark' }, 'Scuro'), el('option', { value: 'light' }, 'Chiaro'), el('option', { value: 'auto' }, 'Come il dispositivo'));
   theme.value = themeChoice === 'auto' || themeChoice === 'light' ? themeChoice : 'dark';
 
+  const groupsNow = allGroups().length;
+  const groupFile = el('input', { id: 'set-groups', type: 'file', accept: '.json,application/json' });
+  const groupErr = el('div', { class: 'err', hidden: true, role: 'alert' });
+  const groupGo = el('button', {
+    type: 'button',
+    id: 'set-groups-go',
+    class: 'btn',
+    onclick: async () => {
+      groupErr.hidden = true;
+      try {
+        const file = groupFile.files?.[0];
+        if (!file) throw new Error('Scegli prima il file.');
+        let data;
+        try { data = JSON.parse(await file.text()); } catch { throw new Error('Il file non si legge: è quello giusto?'); }
+        const list = cleanGroups(Array.isArray(data) ? data : data?.gruppi);
+        if (!list.length) throw new Error('Nel file non ci sono gruppi.');
+        await commit(doc => {
+          doc.meta = { ...(doc.meta ?? {}), gruppi: list, upd: Math.max(Date.now(), (doc.meta?.upd ?? 0) + 1) };
+        });
+        toast(`${list.length} gruppi caricati.`);
+      } catch (err) {
+        groupErr.textContent = err.message;
+        groupErr.hidden = false;
+      }
+    },
+  }, 'Carica i gruppi');
+
   put(view,
     el('h1', {}, 'Impostazioni'),
     el('section', { class: 'card' }, el('h2', {}, 'Sincronizzazione'), status, syncBtn),
@@ -441,6 +543,10 @@ export function renderSettings(view) {
       el('p', { class: 'note' }, 'Il link è cifrato e si apre solo con la tua password. Mandalo a te stesso e aprilo sull\'altro dispositivo.'),
       secretForm(field('La tua password', linkPass), linkErr, linkGo, linkOut, copyBtn)),
     el('section', { class: 'card' }, el('h2', {}, 'Aspetto'), field('Tema', theme)),
+    el('section', { class: 'card' },
+      el('h2', {}, 'Gruppi per cliente e canale'),
+      el('p', { class: 'note', id: 'set-groups-now' }, groupsNow ? `Ora ci sono ${groupsNow} gruppi. Per cambiarli carica un file nuovo.` : 'Nessun gruppo caricato.'),
+      field('File dei gruppi', groupFile), groupErr, groupGo),
     el('section', { class: 'card' },
       el('h2', {}, 'Copie di sicurezza'),
       el('p', { class: 'note' }, 'Il file cifrato si apre solo con la password. Il file leggibile contiene tutto in chiaro: tienilo solo sul tuo PC e non condividerlo.'),
@@ -466,7 +572,9 @@ let themeChoice = null;
 
 export function applyTheme(choice) {
   themeChoice = choice;
-  document.documentElement.dataset.theme = resolveTheme(choice, systemDark.matches);
+  const theme = resolveTheme(choice, systemDark.matches);
+  document.documentElement.dataset.theme = theme;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', THEME_COLOR[theme]);
 }
 
 systemDark.addEventListener('change', () => {
