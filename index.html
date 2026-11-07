@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; manifest-src 'self'; worker-src 'self'; connect-src 'self' https://api.github.com; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#16324f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Manuale">
+<title>Manuale</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="top" hidden>
+  <div class="bar">
+    <button type="button" id="back" class="icon" aria-label="Indietro" hidden>‹</button>
+    <a id="title" href="#/">Manuale</a>
+    <button type="button" id="settings" class="icon" aria-label="Impostazioni">⚙</button>
+  </div>
+  <div class="searchbar">
+    <input type="search" id="q" placeholder="Cosa non ricordi?" aria-label="Cerca nel manuale" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+  </div>
+</header>
+<div id="banner" role="alert" hidden></div>
+<main id="view"></main>
+<dialog id="sheet" aria-labelledby="sheet-title"></dialog>
+<div id="toast" role="status" hidden></div>
+<noscript>Per usare il manuale serve JavaScript.</noscript>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
