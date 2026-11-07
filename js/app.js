@@ -218,7 +218,21 @@ async function boot() {
   applyTheme(themeChoice);
 
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    // Aggiornamento da solo: si controlla a ogni riapertura e, se c'è una versione nuova,
+    // la pagina si ricarica appena non si sta scrivendo nel foglio di modifica.
+    const hadController = Boolean(navigator.serviceWorker.controller);
+    navigator.serviceWorker.register('sw.js').then(reg => {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reg.update().catch(() => {});
+      });
+    }).catch(() => {});
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || reloading) return;
+      reloading = true;
+      if (sheet.open) sheet.addEventListener('close', () => location.reload(), { once: true });
+      else location.reload();
+    });
   }
 
   let state;

@@ -1,5 +1,5 @@
 // Tiene in cache solo il guscio dell'app: nessun contenuto del manuale passa da qui.
-const VERSION = 'mt-944628d789e7';
+const VERSION = 'mt-520b0dcfb09c';
 const ASSETS = [
   './',
   './icons/icon-180.png',
@@ -37,7 +37,8 @@ const ASSETS = [
 
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(VERSION).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting()),
+    // «reload» scavalca la cache del browser: senza, una versione nuova potrebbe salvare file vecchi.
+    caches.open(VERSION).then(cache => cache.addAll(ASSETS.map(url => new Request(url, { cache: 'reload' })))).then(() => self.skipWaiting()),
   );
 });
 
