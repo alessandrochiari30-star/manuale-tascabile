@@ -35,6 +35,49 @@ export function compute(mode, row, values) {
   return { prezzi, listino, principale, scontoPct: round((1 - principale / listino) * 100, 4) };
 }
 
+// Dettaglio del prezzo: per ogni base (listino, nominativo…) le voci diverse da zero
+// nell'ordine in cui si applicano, con il subtotale di ogni prezzo subito dopo le sue voci.
+export function breakdown(mode, row, values) {
+  const out = compute(mode, row, values);
+  if (!out) return null;
+  const blocks = [];
+  let block = null;
+  for (const price of mode.prezzi) {
+    if (!block || block.da !== price.da) {
+      const label = mode.mostra?.find(m => m.col === price.da)?.t ?? 'Listino';
+      block = { da: price.da, seen: new Set(), base: { label, value: row.col[price.da] }, lines: [], subtotals: [], items: [] };
+      blocks.push(block);
+    }
+    const addLine = line => {
+      block.lines.push(line);
+      block.items.push({ kind: 'line', ...line });
+    };
+    for (const key of price.sconti ?? []) {
+      if (block.seen.has(key)) continue;
+      block.seen.add(key);
+      const pct = values[key] || 0;
+      if (!pct) continue;
+      addLine({ label: mode.campi.find(c => c.k === key)?.t ?? key, pct, eur: round(-block.base.value * pct / 100) });
+    }
+    for (const rule of price.meno ?? []) {
+      const seenKey = 'meno:' + rule.campo;
+      if (block.seen.has(seenKey) || !appliesTo(rule, row)) continue;
+      block.seen.add(seenKey);
+      const amount = values[rule.campo] || 0;
+      if (!amount) continue;
+      addLine({ label: mode.campi.find(c => c.k === rule.campo)?.t ?? rule.campo, pct: null, eur: -amount });
+    }
+    const subtotal = { label: price.t, pct: percentOf(price, values), value: out.prezzi[price.id] };
+    block.subtotals.push(subtotal);
+    block.items.push({ kind: 'subtotal', ...subtotal });
+  }
+  return {
+    blocks: blocks.map(({ da, seen, ...rest }) => rest),
+    netto: out.principale,
+    scontoPct: out.scontoPct,
+  };
+}
+
 export function bandValue(bands, pieces) {
   for (const [from, value] of bands) if (pieces >= from) return value;
   return 0;

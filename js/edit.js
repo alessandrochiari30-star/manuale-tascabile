@@ -1,34 +1,48 @@
 // Foglio di modifica: stessi campi da telefono e da PC. Ogni salvataggio marca la voce come «modificata».
-import { el, clear, field, toast, armButton } from './ui.js';
+import { el, field, toast, armButton } from './ui.js';
 import { editNode, addNode, removeNode, restoreNode, countDescendants } from './doc.js';
 import { rowsToText, textToRows, stepsToText, textToSteps, listToText, textToList, sourcesToText, textToSources } from './forms.js';
 import { S, commit } from './session.js';
+import { openSheet, closeSheet } from './sheet.js';
 
 const LABELS = { pt: 'punto', num: 'numero', qa: 'domanda', tab: 'tabella', proc: 'procedura', sec: 'sezione', amb: 'ambito' };
 
 function area(id, value, rows = 4) { return el('textarea', { id, rows, value: value ?? '' }); }
 function line(id, value) { return el('input', { id, value: value ?? '' }); }
 
-function kindSelect(value) {
-  const select = el('select', { id: 'f-k' },
-    el('option', { value: '' }, 'Normale'),
-    el('option', { value: 'key' }, 'Da sapere'),
-    el('option', { value: 'q' }, 'Dubbio da verificare'),
-    el('option', { value: 'n' }, 'Nota'));
-  select.value = value ?? '';
-  return select;
+// Tipo del punto in un tocco: 4 segmenti, uno acceso.
+function kindPicker(value) {
+  let current = value ?? '';
+  const group = el('div', { id: 'f-kind', class: 'segmented', role: 'group', 'aria-label': 'Tipo del punto' });
+  const options = [['', 'Normale'], ['key', 'Da sapere'], ['q', 'Dubbio'], ['n', 'Nota']];
+  for (const [k, label] of options) {
+    group.append(el('button', {
+      type: 'button',
+      'data-k': k,
+      'aria-pressed': k === current ? 'true' : 'false',
+      onclick: () => {
+        current = k;
+        for (const b of group.querySelectorAll('button')) b.setAttribute('aria-pressed', b.dataset.k === current ? 'true' : 'false');
+      },
+    }, label));
+  }
+  group.value = () => current;
+  return group;
 }
 
 // Ogni tipo descrive i suoi campi e come rileggerli.
 const FORMS = {
-  pt: node => ({
-    fields: [
-      field('Testo', area('f-t', node.t, 5), 'Puoi usare **grassetto** e `sigla`.'),
-      field('Tipo', kindSelect(node.k)),
-      field('Fonti', line('f-s', sourcesToText(node.s))),
-    ],
-    read: () => ({ t: val('f-t'), k: val('f-k') || undefined, s: optionalList(textToSources(val('f-s'))) }),
-  }),
+  pt: node => {
+    const kind = kindPicker(node.k);
+    return {
+      fields: [
+        field('Testo', area('f-t', node.t, 5), 'Puoi usare **grassetto** e `sigla`.'),
+        el('div', { class: 'field' }, el('span', {}, 'Tipo'), kind),
+        field('Fonti', line('f-s', sourcesToText(node.s))),
+      ],
+      read: () => ({ t: val('f-t'), k: kind.value() || undefined, s: optionalList(textToSources(val('f-s'))) }),
+    };
+  },
   num: node => ({
     fields: [field('Che cosa', area('f-t', node.t, 2)), field('Valore', line('f-val', node.val)), field('Fonti', line('f-s', sourcesToText(node.s)))],
     read: () => ({ t: val('f-t'), val: val('f-val'), s: optionalList(textToSources(val('f-s'))) }),
@@ -76,12 +90,8 @@ function val(id) { return document.getElementById(id).value.trim(); }
 function optionalList(list) { return list.length ? list : undefined; }
 
 function show(title, form, actions) {
-  const sheet = document.getElementById('sheet');
-  clear(sheet);
   const err = el('div', { class: 'err', hidden: true, role: 'alert' });
-  sheet.append(el('h2', { id: 'sheet-title' }, title), ...form.fields, err, el('div', { class: 'sheet-actions' }, actions(err)));
-  sheet.showModal();
-  return sheet;
+  return openSheet({ title, body: [...form.fields, err], actions: actions(err) });
 }
 
 function saveAction(form, err, apply) {
@@ -96,14 +106,10 @@ function saveAction(form, err, apply) {
         err.hidden = false;
         return;
       }
-      document.getElementById('sheet').close();
+      closeSheet();
       await commit(doc => apply(doc, fields)).catch(() => {});
     },
   }, 'Salva');
-}
-
-function cancelAction() {
-  return el('button', { type: 'button', id: 'f-cancel', class: 'btn', onclick: () => document.getElementById('sheet').close() }, 'Annulla');
 }
 
 export function openEditor(id) {
@@ -114,18 +120,18 @@ export function openEditor(id) {
   show('Modifica ' + (LABELS[node.ty] ?? 'voce'), form, err => {
     const kids = countAllKids(id);
     const del = armButton(
-      el('button', { type: 'button', id: 'f-del', class: 'btn danger' }, 'Elimina'),
+      el('button', { type: 'button', id: 'f-del', class: 'btn danger text' }, 'Elimina'),
       kids ? `Conferma: elimina con ${kids} sotto-voci` : 'Conferma: elimina',
       async () => {
-        document.getElementById('sheet').close();
+        closeSheet();
         await commit(doc => removeNode(doc, id)).catch(() => {});
         toast('Eliminato.', { label: 'Annulla', run: () => commit(doc => restoreNode(doc, id)).catch(() => {}) });
       },
     );
     const addChild = node.ty === 'pt'
-      ? el('button', { type: 'button', class: 'btn', onclick: () => { document.getElementById('sheet').close(); openNew(id, 'pt'); } }, '＋ Sotto-punto')
+      ? el('button', { type: 'button', class: 'btn text', onclick: () => { closeSheet(); setTimeout(() => openNew(id, 'pt'), 260); } }, '＋ Sotto-punto')
       : null;
-    return [saveAction(form, err, (doc, fields) => editNode(doc, id, { ...fields, ed: true })), cancelAction(), el('span', { class: 'spacer' }), addChild, del];
+    return [saveAction(form, err, (doc, fields) => editNode(doc, id, { ...fields, ed: true })), addChild, el('span', { class: 'spacer' }), del];
   });
 }
 
@@ -151,7 +157,6 @@ export function openNew(parentId, ty) {
   const form = FORMS[ty](BLANK[ty]);
   show('Nuovo ' + (LABELS[ty] ?? 'voce'), form, err => [
     saveAction(form, err, (doc, fields) => addNode(doc, parentId, { ty, ...fields, ed: true })),
-    cancelAction(),
   ]);
 }
 

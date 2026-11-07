@@ -1,5 +1,5 @@
 // Tiene in cache solo il guscio dell'app: nessun contenuto del manuale passa da qui.
-const VERSION = 'mt-24a75b0e1ea1';
+const VERSION = 'mt-e4f1b63d8809';
 const ASSETS = [
   './',
   './icons/icon-180.png',
@@ -11,15 +11,21 @@ const ASSETS = [
   './js/doc.js',
   './js/edit.js',
   './js/entries.js',
+  './js/facets.js',
   './js/forms.js',
   './js/gate.js',
+  './js/icons.js',
   './js/inline.js',
+  './js/motion.js',
   './js/quiz.js',
+  './js/recent.js',
   './js/remote.js',
   './js/search.js',
   './js/session.js',
+  './js/sheet.js',
   './js/store.js',
   './js/sync.js',
+  './js/theme.js',
   './js/ui.js',
   './js/vault.js',
   './js/views-tools.js',

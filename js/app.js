@@ -5,13 +5,64 @@ import { renderWelcome, renderUnlock } from './gate.js';
 import { renderHome, renderAmbito, renderSection, renderSearch, renderDoubts, renderSettings, renderMissing, statusText, applyTheme } from './views.js';
 import { renderCalc, renderProposal, renderQuiz } from './views-tools.js';
 import { hasLink } from './vault.js';
+import { icon } from './icons.js';
+import { getState } from './doc.js';
+import { transition } from './motion.js';
 
 const view = document.getElementById('view');
 const top = document.getElementById('top');
 const banner = document.getElementById('banner');
 const input = document.getElementById('q');
 const back = document.getElementById('back');
-const title = document.getElementById('title');
+const searchBtn = document.getElementById('search-btn');
+const settingsBtn = document.getElementById('settings');
+const syncLine = document.getElementById('sync-line');
+const syncText = document.getElementById('sync-text');
+const homeTitle = document.getElementById('home-title');
+const searchForm = document.getElementById('search-form');
+const tabs = document.getElementById('tabs');
+const badge = document.getElementById('tab-badge');
+
+back.append(icon('back'));
+searchBtn.append(icon('search'));
+settingsBtn.append(icon('gear'));
+document.getElementById('search-icon').append(icon('search', 19));
+const TAB_ICONS = { home: 'home', cerca: 'search', ripasso: 'cards', calc: 'calc' };
+for (const link of tabs.querySelectorAll('a[data-tab]')) link.querySelector('.pill').prepend(icon(TAB_ICONS[link.dataset.tab], 19));
+
+// Quale scheda della barra in basso è accesa per ogni schermata.
+function tabOf(section) {
+  if (section === 'cerca') return 'cerca';
+  if (section === 'ripasso') return 'ripasso';
+  if (section === 'calc' || section === 'proposta') return 'calc';
+  if (section === 'imp') return null;
+  return 'home';
+}
+
+// Home: stato, impostazioni, titolo e ricerca grande. Ricerca: indietro e campo. Altre: indietro e cerca.
+function setHeader(section) {
+  const mode = section === undefined ? 'home' : section === 'cerca' ? 'cerca' : 'altro';
+  root.dataset.mode = mode;
+  back.hidden = mode === 'home';
+  syncLine.hidden = mode !== 'home';
+  settingsBtn.hidden = mode !== 'home';
+  homeTitle.hidden = mode !== 'home';
+  searchBtn.hidden = mode !== 'altro';
+  searchForm.hidden = mode === 'altro';
+  const active = tabOf(section);
+  for (const link of tabs.querySelectorAll('a[data-tab]')) {
+    if (link.dataset.tab === active) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
+  }
+}
+
+function refreshBadge() {
+  const count = S.doc ? (getState(S.doc, 'proposta') ?? []).length : 0;
+  badge.textContent = String(count);
+  badge.hidden = count === 0;
+}
+
+let focusSearch = false;
 const sheet = document.getElementById('sheet');
 const root = document.documentElement;
 
@@ -30,8 +81,8 @@ function render({ keepScroll = false } = {}) {
   const y = window.scrollY;
   const { hash, parts, params } = parseHash();
   clear(view);
-  back.hidden = parts.length === 0;
-  title.textContent = S.doc.meta?.titolo ?? 'Manuale';
+  setHeader(parts[0]);
+  refreshBadge();
   const onSearch = parts[0] === 'cerca';
   if (!onSearch) lastPlace = hash;
   if (document.activeElement !== input || !onSearch) input.value = onSearch ? (params.get('q') ?? '') : '';
@@ -40,7 +91,7 @@ function render({ keepScroll = false } = {}) {
     case undefined: renderHome(view); break;
     case 'a': renderAmbito(view, parts[1]); break;
     case 's': renderSection(view, parts[1], params.get('f')); break;
-    case 'cerca': renderSearch(view, params.get('q') ?? ''); break;
+    case 'cerca': renderSearch(view, params.get('q') ?? '', params.get('t') ?? 'tutto'); break;
     case 'dubbi': renderDoubts(view); break;
     case 'calc': renderCalc(view); break;
     case 'proposta': renderProposal(view); break;
@@ -51,6 +102,10 @@ function render({ keepScroll = false } = {}) {
   root.dataset.view = hash;
   if (keepScroll) window.scrollTo(0, y);
   else if (!params.get('f')) window.scrollTo(0, 0);
+  if (onSearch && focusSearch) {
+    focusSearch = false;
+    input.focus();
+  }
 }
 
 // --- ricerca: sempre in alto ---
@@ -61,7 +116,7 @@ function runSearch() {
   const onSearch = parts[0] === 'cerca';
   if (!query) {
     if (onSearch) {
-      history.replaceState(null, '', lastPlace);
+      history.replaceState(null, '', '#/cerca');
       render();
     }
     return;
@@ -89,16 +144,34 @@ document.getElementById('search-form').addEventListener('submit', event => {
 });
 
 // --- navigazione ---
+// Avanti o indietro: decide il verso dello scorrimento.
+const trail = [];
+function directionFor(hash) {
+  if (trail.length > 1 && trail[trail.length - 2] === hash) {
+    trail.pop();
+    return 'back';
+  }
+  if (trail[trail.length - 1] !== hash) trail.push(hash);
+  return 'forward';
+}
+
 window.addEventListener('hashchange', () => {
   navigated++;
-  render();
+  if (!inApp) return;
+  const direction = directionFor(location.hash || '#/');
+  transition(() => render(), direction);
 });
 window.addEventListener('rerender', () => render({ keepScroll: true }));
 back.addEventListener('click', () => {
   if (navigated > 0 || history.length > 1) history.back();
   else location.hash = '#/';
 });
-document.getElementById('settings').addEventListener('click', () => { location.hash = '#/imp'; });
+settingsBtn.addEventListener('click', () => { location.hash = '#/imp'; });
+searchBtn.addEventListener('click', () => {
+  focusSearch = true;
+  location.hash = '#/cerca';
+});
+tabs.querySelector('a[data-tab="cerca"]').addEventListener('click', () => { focusSearch = true; });
 
 // Un aggiornamento mentre si scrive nel foglio non deve far perdere il testo: si ridisegna alla chiusura.
 let pendingRender = false;
@@ -122,19 +195,26 @@ on('status', () => {
   banner.textContent = kind === 'error' ? msg : '';
   const line = document.getElementById('status');
   if (line) line.textContent = statusText();
+  syncText.textContent = statusText();
+  refreshBadge();
 });
 
 function enter() {
   inApp = true;
   top.hidden = false;
+  tabs.hidden = false;
+  trail.length = 0;
+  trail.push(location.hash || '#/');
   render();
   syncNow().catch(() => {});
 }
 
 async function boot() {
+  let themeChoice = null;
   try {
-    applyTheme(localStorage.getItem('tema') ?? '');
+    themeChoice = localStorage.getItem('tema');
   } catch { /* preferenza non essenziale */ }
+  applyTheme(themeChoice);
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});

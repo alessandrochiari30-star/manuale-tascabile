@@ -7,12 +7,18 @@ import { snippet } from './forms.js';
 import { plainText } from './inline.js';
 import { S, commit, syncNow, lock, deviceLink, updateToken, forgetDevice, sealedExport } from './session.js';
 import { WrongPassword } from './vault.js';
+import { resolveTheme } from './theme.js';
+import { stagger } from './motion.js';
+import { icon } from './icons.js';
+import { addRecent } from './recent.js';
+import { facets, filterResults, kindOf } from './facets.js';
 import { openEditor, openNew } from './edit.js';
 
 const fonti = () => S.doc.meta?.fonti ?? {};
 const nav = hash => { location.hash = hash; };
 
 // --- home ---
+let homeShown = false;
 export function renderHome(view) {
   const tiles = childrenOf(S.tree, null).map((a, i) => {
     const hasTool = childrenOf(S.tree, a.id).some(n => n.ty === 'link');
@@ -21,16 +27,30 @@ export function renderHome(view) {
     const facts = [`${countDescendants(S.tree, a.id, 'pt')} ${unit}`];
     if (hasTool) facts.push('calcolatore');
     else if (procs) facts.push(`${procs} procedure`);
-    return el('a', { class: 'tile' + (i === 0 ? ' main' : ''), href: `#/a/${encodeURIComponent(a.id)}` }, el('b', {}, a.t), el('span', {}, facts.join(' · ')));
+    return el('a', { class: 'tile' + (i === 0 ? ' main' : ''), href: `#/a/${encodeURIComponent(a.id)}` },
+      icon('amb' + i, 22),
+      el('span', { class: 'tile-text' }, el('b', {}, a.t), el('span', {}, facts.join(' · '))));
   });
   const questions = Object.values(S.doc.nodes).filter(n => S.tree.visible.has(n.id) && (n.ty === 'qa' || n.ty === 'proc')).length;
-  tiles.push(el('a', { class: 'tile', href: '#/ripasso' }, el('b', {}, 'Ripasso'), el('span', {}, `${questions} domande`)));
+  tiles.push(el('a', { class: 'tile', href: '#/ripasso' },
+    icon('cards', 22),
+    el('span', { class: 'tile-text' }, el('b', {}, 'Ripasso'), el('span', {}, `${questions} domande`))));
 
+  // I riquadri entrano in sequenza solo alla prima apertura: dopo, la Home deve essere subito pronta.
+  if (!homeShown) {
+    homeShown = true;
+    stagger(tiles);
+  }
   const doubts = doubtNodes().length;
-  put(view, 
+  const recent = addRecent(getState(S.doc, 'recenti'), '');
+  put(view,
+    recent.length ? el('div', { class: 'recents' }, recent.map(query => el('a', { class: 'recent', href: `#/cerca?q=${encodeURIComponent(query)}` }, icon('clock', 14), query))) : null,
+    el('p', { class: 'label' }, 'Ambiti'),
     el('div', { class: 'grid' }, tiles),
-    doubts ? el('a', { id: 'home-dubbi', class: 'row warn', href: '#/dubbi' }, el('div', { class: 'grow' }, el('b', {}, `${doubts} dubbi aperti`), el('span', {}, 'Da verificare prima di dirli a un cliente')), el('i', { class: 'go' }, '›')) : null,
-    el('p', { class: 'status', id: 'status' }, statusText()),
+    doubts ? el('a', { id: 'home-dubbi', href: '#/dubbi' },
+      icon('alert'),
+      el('span', { class: 'grow' }, el('b', {}, `${doubts} dubbi da verificare`), el('span', {}, 'Prima di dirli a un cliente')),
+      icon('go', 18)) : null,
   );
 }
 
@@ -58,7 +78,7 @@ export function renderAmbito(view, id) {
     const href = kid.ty === 'link' ? `#/${kid.route}` : `#/s/${encodeURIComponent(kid.id)}`;
     put(view, el('a', { class: 'row' + (kid.ty === 'link' ? ' tool' : ''), href },
       el('div', { class: 'grow' }, el('b', {}, kid.t), kid.sub ? el('span', {}, kid.sub) : null),
-      el('i', { class: 'go' }, '›')));
+      icon('go', 18)));
   }
 }
 
@@ -66,40 +86,57 @@ export function renderAmbito(view, id) {
 const expanded = new Set();
 
 function editButton(id) {
-  return el('button', { type: 'button', class: 'edit', 'aria-label': 'Modifica', onclick: event => { event.stopPropagation(); event.preventDefault(); openEditor(id); } }, '✎');
+  return el('button', { type: 'button', class: 'edit', 'aria-label': 'Modifica', onclick: event => { event.stopPropagation(); event.preventDefault(); openEditor(id); } }, icon('pencil', 18));
 }
 
-function renderPoint(node, focusId) {
+function flagOf(node) {
+  if (node.k === 'key') return el('span', { class: 'flag-key' }, 'Da sapere');
+  if (node.k === 'q') return el('span', { class: 'flag-doubt' }, 'Da verificare');
+  return null;
+}
+
+// Voce: in cima alla sezione è una scheda; i sotto-punti sono righe separate da divisori.
+function renderPoint(node, focusId, depth) {
   const kids = childrenOf(S.tree, node.id);
   const classes = ['node'];
+  if (depth === 0) classes.push('card');
   if (kids.length) classes.push('can');
   if (node.k === 'key') classes.push('key');
   if (node.k === 'q') classes.push('doubt');
   if (node.k === 'n') classes.push('note');
   if (node.id === focusId) classes.push('flash');
-  const open = expanded.has(node.id);
+  const open = kids.length > 0 && expanded.has(node.id);
   if (open) classes.push('open');
 
   const box = el('div', { class: classes.join(' '), 'data-id': node.id });
+  const wrap = kids.length ? el('div', { class: 'kids-wrap' }) : null;
+  const chev = kids.length ? el('button', { type: 'button', class: 'chev', 'aria-expanded': open ? 'true' : 'false', 'aria-label': 'Apri o chiudi' }, icon('chevron', 16)) : null;
+  const fill = () => { if (!wrap.firstChild) wrap.append(kidsOf(kids, focusId, depth + 1)); };
   const toggle = () => {
-    if (expanded.has(node.id)) expanded.delete(node.id);
-    else expanded.add(node.id);
-    const holder = box.querySelector(':scope > .kids');
-    box.classList.toggle('open');
-    if (holder) holder.hidden = !box.classList.contains('open');
-    else if (box.classList.contains('open')) box.append(kidsOf(kids, focusId));
+    const willOpen = !box.classList.contains('open');
+    if (willOpen) {
+      expanded.add(node.id);
+      fill();
+      void wrap.offsetHeight; // il contenuto esiste prima che parta l'animazione dell'altezza
+    } else {
+      expanded.delete(node.id);
+    }
+    box.classList.toggle('open', willOpen);
+    wrap.inert = !willOpen;
+    chev.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
   };
+  if (chev) chev.addEventListener('click', toggle);
+  if (open) fill();
+  if (wrap) wrap.inert = !open;
+
   const source = sourcesLine(node.s, fonti());
   const text = el('div', { class: 'node-text', onclick: kids.length ? toggle : undefined },
-    node.k === 'q' ? el('span', { class: 'flag' }, '⚠ Da verificare') : null,
-    inlineNodes(node.t),
+    flagOf(node),
+    el('span', { class: 'node-body' }, inlineNodes(node.t)),
     typeof node.v === 'number' ? el('div', { class: 'vbar' }, barFill(node.v)) : null,
     source || node.ed ? el('span', { class: 'src' }, source, node.ed ? el('span', { class: 'mine' }, source ? ' · modificato da te' : 'modificato da te') : null) : null);
-  box.append(el('div', { class: 'node-row' },
-    kids.length ? el('button', { type: 'button', class: 'chev', 'aria-label': 'Apri o chiudi', onclick: toggle }, '▸') : el('span', { class: 'nochev' }),
-    text,
-    editButton(node.id)));
-  if (open && kids.length) box.append(kidsOf(kids, focusId));
+  box.append(el('div', { class: 'node-row' }, text, editButton(node.id), chev));
+  if (wrap) box.append(wrap);
   return box;
 }
 
@@ -109,8 +146,8 @@ function barFill(value) {
   return fill;
 }
 
-function kidsOf(kids, focusId) {
-  return el('div', { class: 'kids' }, kids.map(kid => renderAny(kid, focusId)));
+function kidsOf(kids, focusId, depth) {
+  return el('div', { class: 'kids' }, kids.map(kid => renderAny(kid, focusId, depth)));
 }
 
 function renderTable(node, focusId) {
@@ -122,8 +159,8 @@ function renderTable(node, focusId) {
       onclick: query ? () => { location.hash = `#/cerca?q=${encodeURIComponent(query)}`; } : undefined,
     }, row.map(cell => el('td', {}, cell)));
   });
-  return el('div', { class: 'tabblock' + (node.id === focusId ? ' node flash' : ''), 'data-id': node.id },
-    el('div', { class: 'tabhead node-row' }, el('span', {}, node.t), editButton(node.id)),
+  return el('div', { class: 'tabblock card' + (node.id === focusId ? ' node flash' : ''), 'data-id': node.id },
+    el('div', { class: 'tabhead' }, el('span', {}, node.t), editButton(node.id)),
     el('div', { class: 'tabwrap' }, el('table', {},
       el('thead', {}, el('tr', {}, (node.cols ?? []).map(col => el('th', {}, col)))),
       el('tbody', {}, body))),
@@ -131,7 +168,7 @@ function renderTable(node, focusId) {
 }
 
 function renderNumber(node, focusId) {
-  return el('div', { class: 'node' + (node.id === focusId ? ' flash' : ''), 'data-id': node.id },
+  return el('div', { class: 'node card' + (node.id === focusId ? ' flash' : ''), 'data-id': node.id },
     el('div', { class: 'num node-row' },
       el('div', { class: 'grow' }, el('span', { class: 'val' }, node.val), node.t,
         sourcesLine(node.s, fonti()) ? el('span', { class: 'src' }, sourcesLine(node.s, fonti())) : null),
@@ -170,13 +207,13 @@ function renderProcedure(node, focusId) {
       editButton(node.id)));
 }
 
-function renderAny(node, focusId) {
+function renderAny(node, focusId, depth = 0) {
   switch (node.ty) {
     case 'tab': return renderTable(node, focusId);
     case 'num': return renderNumber(node, focusId);
     case 'qa': return renderQuestion(node, focusId);
     case 'proc': return renderProcedure(node, focusId);
-    default: return renderPoint(node, focusId);
+    default: return renderPoint(node, focusId, depth);
   }
 }
 
@@ -188,8 +225,11 @@ export function renderSection(view, id, focusId) {
   const kids = childrenOf(S.tree, id);
   const expandable = kids.some(kid => childrenOf(S.tree, kid.id).length);
   const addTy = addTypeFor(kids);
-  put(view, 
-    el('div', { class: 'tabhead' }, el('h1', {}, node.t), editButton(id)),
+  const ambito = breadcrumb(S.tree, id)[0];
+  put(view,
+    el('div', { class: 'sec-head' },
+      el('div', { class: 'grow' }, ambito ? el('p', { class: 'eyebrow' }, ambito.t) : null, el('h1', {}, node.t)),
+      editButton(id)),
     node.sub ? el('p', { class: 'sub' }, node.sub) : null,
     expandable ? el('div', { class: 'tools' }, el('button', {
       type: 'button',
@@ -209,8 +249,8 @@ export function renderSection(view, id, focusId) {
         window.dispatchEvent(new CustomEvent('rerender'));
       },
     }, 'Apri o chiudi tutto')) : null,
-    el('div', {}, kids.map(kid => renderAny(kid, focusId))),
-    el('div', { class: 'tools' }, el('button', { type: 'button', id: 'add-node', class: 'btn', onclick: () => openNew(id, addTy.ty) }, '＋ ' + addTy.label)),
+    el('div', { class: 'cards' }, kids.map(kid => renderAny(kid, focusId, 0))),
+    el('button', { type: 'button', id: 'add-node', class: 'add-btn', onclick: () => openNew(id, addTy.ty) }, icon('plus', 18), addTy.label),
   );
   if (focusId) {
     const target = view.querySelector(`[data-id="${CSS.escape(focusId)}"]`);
@@ -239,32 +279,56 @@ export function targetOf(node) {
   return `#/s/${encodeURIComponent(section.id)}?f=${encodeURIComponent(node.id)}`;
 }
 
-function resultCard(node, words) {
+function resultCard(node, words, query = '') {
   const doubt = node.k === 'q';
   const path = breadcrumb(S.tree, node.id).map(p => plainText(p.t)).slice(0, 3).join(' › ');
   const text = node.ty === 'num' ? `${node.t}: ${node.val}` : entryText(node);
   const source = sourcesLine(node.s, fonti());
-  return el('article', { class: 'res' + (doubt ? ' dubbio' : '') },
-    el('button', { type: 'button', class: 'res-open', onclick: () => nav(targetOf(node)) },
-      el('span', { class: 'res-kind' }, doubt ? '⚠ Da verificare' : (KINDS[node.ty] ?? 'Voce')),
-      path ? el('span', { class: 'res-path' }, path) : null,
+  return el('article', { class: 'res' + (doubt ? ' dubbio' : ''), 'data-kind': kindOf(node) ?? node.ty },
+    el('button', {
+      type: 'button',
+      class: 'res-open',
+      onclick: () => {
+        if (query) commit(doc => setState(doc, 'recenti', addRecent(getState(doc, 'recenti'), query)), { render: false }).catch(() => {});
+        nav(targetOf(node));
+      },
+    },
+      el('span', { class: 'res-meta' },
+        el('span', { class: 'res-kind' }, doubt ? 'Da verificare' : (KINDS[node.ty] ?? 'Voce')),
+        path ? el('span', { class: 'res-path' }, ' · ' + path) : null),
       el('b', {}, snippet(text, words, 190).map(part => (part.hit ? el('mark', {}, part.t) : part.t)))),
     el('div', { class: 'res-foot' },
       el('span', {}, source),
-      node.ty === 'link' ? null : el('button', { type: 'button', class: 'edit', onclick: () => openEditor(node.id) }, '✎ Modifica')));
+      node.ty === 'link' ? null : el('button', { type: 'button', class: 'edit', 'aria-label': 'Modifica', onclick: () => openEditor(node.id) }, icon('pencil', 18))));
 }
 
-export function renderSearch(view, query) {
-  const results = search(S.index, query, { synonyms: S.doc.meta?.sinonimi ?? [] });
-  if (!results.length) {
+export function renderSearch(view, query, kind = 'tutto') {
+  if (!query.trim()) {
+    put(view, el('p', { class: 'sub' }, 'Scrivi una parola, anche a metà: cerco in tutto il manuale.'));
+    return;
+  }
+  const all = search(S.index, query, { synonyms: S.doc.meta?.sinonimi ?? [], limit: 200 });
+  if (!all.length) {
     put(view, el('p', { class: 'sub' }, `Nessun risultato per «${query}». Prova con meno parole o con un'altra parola.`));
     return;
   }
-  put(view, el('p', { class: 'muted' }, results.length >= 60 ? 'I primi 60 risultati' : `${results.length} risultati`));
-  for (const result of results) {
+  const chips = facets(all, S.doc.nodes);
+  const active = chips.some(c => c.key === kind) ? kind : 'tutto';
+  const base = `#/cerca?q=${encodeURIComponent(query)}`;
+  put(view, el('div', { class: 'facets', role: 'group', 'aria-label': 'Filtra per tipo' }, chips.map(chip => el('a', {
+    class: 'facet',
+    href: chip.key === 'tutto' ? base : `${base}&t=${chip.key}`,
+    'data-key': chip.key,
+    'aria-current': chip.key === active ? 'true' : 'false',
+  }, chip.label, el('span', {}, String(chip.count))))));
+  const shown = filterResults(all, S.doc.nodes, active).slice(0, 60);
+  const cards = [];
+  for (const result of shown) {
     const node = S.doc.nodes[result.id];
-    if (node) put(view, resultCard(node, result.words));
+    if (node) cards.push(resultCard(node, result.words, query));
   }
+  stagger(cards.slice(0, 10), 25);
+  put(view, cards);
 }
 
 function doubtNodes() {
@@ -366,10 +430,10 @@ export function renderSettings(view) {
       applyTheme(event.target.value);
       try { localStorage.setItem('tema', event.target.value); } catch { /* preferenza non essenziale */ }
     },
-  }, el('option', { value: '' }, 'Come il dispositivo'), el('option', { value: 'light' }, 'Chiaro'), el('option', { value: 'dark' }, 'Scuro'));
-  theme.value = document.documentElement.dataset.theme ?? '';
+  }, el('option', { value: 'dark' }, 'Scuro'), el('option', { value: 'light' }, 'Chiaro'), el('option', { value: 'auto' }, 'Come il dispositivo'));
+  theme.value = themeChoice === 'auto' || themeChoice === 'light' ? themeChoice : 'dark';
 
-  put(view, 
+  put(view,
     el('h1', {}, 'Impostazioni'),
     el('section', { class: 'card' }, el('h2', {}, 'Sincronizzazione'), status, syncBtn),
     el('section', { class: 'card' },
@@ -397,7 +461,14 @@ export function renderSettings(view) {
   );
 }
 
-export function applyTheme(value) {
-  if (value) document.documentElement.dataset.theme = value;
-  else delete document.documentElement.dataset.theme;
+const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
+let themeChoice = null;
+
+export function applyTheme(choice) {
+  themeChoice = choice;
+  document.documentElement.dataset.theme = resolveTheme(choice, systemDark.matches);
 }
+
+systemDark.addEventListener('change', () => {
+  if (themeChoice === 'auto') applyTheme('auto');
+});

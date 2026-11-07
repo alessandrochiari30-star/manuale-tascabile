@@ -1,7 +1,9 @@
 // Strumenti: calcolatore del netto, proposta al cliente e ripasso.
 import { el, put, clear, field, toast, armButton } from './ui.js';
 import { getState, setState } from './doc.js';
-import { compute, bandValue, percentOf, proposalLine, proposalTotals, proposalText, formatEuro, formatPct, conditionsText } from './calc.js';
+import { compute, bandValue, breakdown, proposalLine, proposalTotals, proposalText, formatEuro, formatPct, conditionsText } from './calc.js';
+import { icon } from './icons.js';
+import { openSheet, closeSheet } from './sheet.js';
 import { normalize } from './search.js';
 import { questionsOf, pickNext, quizCounts } from './quiz.js';
 import { childrenOf } from './doc.js';
@@ -15,11 +17,17 @@ const PROPOSAL_KEY = 'proposta';
 const memory = new Map();
 
 function modeState(mode) {
-  if (!memory.has(mode.id)) memory.set(mode.id, { values: { ...mode.def }, channel: mode.canali[0]?.id ?? '', query: '', pieces: '' });
+  if (!memory.has(mode.id)) memory.set(mode.id, { values: { ...mode.def }, channel: mode.canali[0]?.id ?? '', query: '', pieces: '', selected: null });
   return memory.get(mode.id);
 }
 
 let currentModeId = null;
+
+function step(n, text, forId) {
+  return el(forId ? 'label' : 'p', { class: 'step', for: forId }, el('b', {}, String(n)), ' · ' + text);
+}
+
+const minus = value => '−' + formatEuro(Math.abs(value));
 
 export function renderCalc(view) {
   const calc = S.doc.calc;
@@ -30,6 +38,7 @@ export function renderCalc(view) {
   currentModeId ??= calc.modi[0].id;
   const mode = calc.modi.find(m => m.id === currentModeId) ?? calc.modi[0];
   const state = modeState(mode);
+  const count = (getState(S.doc, PROPOSAL_KEY) ?? []).length;
 
   const modeSelect = el('select', {
     id: 'c-mode',
@@ -41,35 +50,21 @@ export function renderCalc(view) {
   }, calc.modi.map(m => el('option', { value: m.id }, m.t)));
   modeSelect.value = mode.id;
 
-  const channelSelect = el('select', {
-    id: 'c-chan',
-    onchange: event => {
-      state.channel = event.target.value;
-      Object.assign(state.values, mode.canali.find(c => c.id === state.channel)?.val);
-      syncFields();
-      drawList();
-    },
-  }, mode.canali.map(c => el('option', { value: c.id }, c.t)));
-  channelSelect.value = state.channel;
-
-  const inputs = new Map();
-  const params = el('div', { class: 'params' }, mode.campi.map(campo => {
-    const input = el('input', {
-      id: 'cf-' + campo.k,
-      type: 'number',
-      inputmode: 'decimal',
-      min: '0',
-      step: campo.u === '€' ? '1' : '0.1',
-      value: state.values[campo.k] ?? 0,
-      oninput: event => {
-        state.values[campo.k] = parseFloat(String(event.target.value).replace(',', '.')) || 0;
+  const chips = el('div', { class: 'chips', role: 'group', 'aria-label': 'Canale' });
+  for (const channel of mode.canali) {
+    chips.append(el('button', {
+      type: 'button',
+      class: 'chan',
+      'data-id': channel.id,
+      'aria-pressed': channel.id === state.channel ? 'true' : 'false',
+      onclick: () => {
+        state.channel = channel.id;
+        Object.assign(state.values, channel.val);
+        for (const b of chips.children) b.setAttribute('aria-pressed', b.dataset.id === channel.id ? 'true' : 'false');
         drawList();
       },
-    });
-    inputs.set(campo.k, input);
-    return field(`${campo.t} (${campo.u})`, input, campo.nota);
-  }));
-  const syncFields = () => { for (const [key, input] of inputs) input.value = state.values[key] ?? 0; };
+    }, channel.t.split(' · ')[0]));
+  }
 
   const band = mode.fascia ? el('input', {
     id: 'c-band',
@@ -82,12 +77,10 @@ export function renderCalc(view) {
       const pieces = parseInt(event.target.value, 10);
       if (Number.isNaN(pieces)) return;
       state.values[mode.fascia.campo] = bandValue(mode.fascia.soglie, pieces);
-      syncFields();
       drawList();
     },
   }) : null;
 
-  const summary = el('div', { id: 'c-summary', class: 'summary' });
   const list = el('div', { id: 'c-list' });
   const search = el('input', {
     id: 'c-q',
@@ -98,61 +91,111 @@ export function renderCalc(view) {
     autocomplete: 'off',
     oninput: event => {
       state.query = event.target.value;
+      state.selected = null;
       drawList();
     },
   });
+
+  function openConditions() {
+    const params = el('div', { class: 'params' }, mode.campi.map(campo => field(`${campo.t} (${campo.u})`, el('input', {
+      id: 'cf-' + campo.k,
+      type: 'number',
+      inputmode: 'decimal',
+      min: '0',
+      step: campo.u === '€' ? '1' : '0.1',
+      value: state.values[campo.k] ?? 0,
+      oninput: event => {
+        state.values[campo.k] = parseFloat(String(event.target.value).replace(',', '.')) || 0;
+        drawList();
+      },
+    }), campo.nota)));
+    openSheet({
+      title: 'Condizioni applicate',
+      body: [el('p', { class: 'note' }, 'Valgono per questo calcolo finché l\'app è aperta.'), params],
+      actions: [el('button', { type: 'button', class: 'btn primary', id: 'c-cond-done', onclick: () => closeSheet() }, 'Fatto')],
+    });
+  }
 
   function drawList() {
     const rows = calc.listini[mode.listino] ?? [];
     const wanted = normalize(state.query).split(/\s+/).filter(Boolean);
     const matching = wanted.length ? rows.filter(row => wanted.every(word => normalize(row.cerca).includes(word))) : rows;
-
-    const parts = mode.prezzi.map(price => [price.t, formatPct(percentOf(price, state.values))]);
-    const extras = mode.prezzi.flatMap(price => price.meno ?? []).filter(rule => state.values[rule.campo]).map(rule => `− ${state.values[rule.campo]} €`);
-    const average = matching.length ? matching.reduce((sum, row) => sum + (row.col[mode.prezzi.find(p => p.id === mode.principale).da] || 0), 0) / matching.length : 0;
-    clear(summary);
-    summary.append(...parts.map(([label, value]) => el('span', {}, label + ' ', el('b', {}, value))));
-    if (extras.length) summary.append(el('span', {}, extras.join(' ')));
-    summary.append(el('span', {}, `1% ≈ ${formatEuro(average / 100)}${calc.notaUnPct ? ' (' + calc.notaUnPct + ')' : ''}`));
-
     clear(list);
-    list.append(el('p', { class: 'muted' }, `${matching.length} articoli`));
-    if (!matching.length) list.append(el('p', { class: 'sub' }, 'Nessun articolo trovato.'));
-    matching.slice(0, MAX_ROWS).forEach(row => list.append(itemCard(mode, row, state)));
+    if (!matching.length) {
+      list.append(el('p', { class: 'sub' }, 'Nessun articolo trovato.'));
+      return;
+    }
+    const chosen = matching.length === 1 ? matching[0] : matching.find(row => row.codice === state.selected);
+    if (chosen) {
+      list.append(detailCard(mode, chosen, state, calc));
+      if (matching.length > 1) {
+        list.append(el('button', { type: 'button', class: 'btn', onclick: () => { state.selected = null; drawList(); } }, 'Torna all\'elenco'));
+      }
+      return;
+    }
+    list.append(el('p', { class: 'muted' }, `${matching.length} articoli · tocca per il dettaglio`));
+    matching.slice(0, MAX_ROWS).forEach(row => list.append(compactItem(mode, row, state, () => {
+      state.selected = row.codice;
+      drawList();
+      list.scrollIntoView({ block: 'start' });
+    })));
     if (matching.length > MAX_ROWS) list.append(el('p', { class: 'muted' }, `Mostro i primi ${MAX_ROWS}: restringi la ricerca.`));
   }
 
   put(view,
-    el('h1', {}, 'Calcola il netto'),
+    el('div', { class: 'sec-head' },
+      el('div', { class: 'grow' }, el('h1', {}, 'Calcola il netto')),
+      el('a', { id: 'c-prop', class: 'btn', href: '#/proposta' }, 'Proposta', count ? el('span', { class: 'count' }, String(count)) : null)),
+    step(1, 'Tipo e canale'),
     field('Tipo', modeSelect),
-    field('Canale', channelSelect),
+    chips,
     band ? field(mode.fascia.t, band, `Aggiorna da solo «${mode.campi.find(c => c.k === mode.fascia.campo)?.t}»`) : null,
-    field('Articolo', search),
-    summary,
-    el('details', { class: 'qa' }, el('summary', {}, 'Modifica le condizioni'), el('div', { class: 'detail-body' }, params)),
+    step(2, 'Articolo', 'c-q'),
+    search,
+    step(3, 'Netto e dettaglio degli sconti'),
     list,
-    el('a', { class: 'row tool', href: '#/proposta' }, el('div', { class: 'grow' }, el('b', {}, 'Apri la proposta al cliente')), el('i', { class: 'go' }, '›')),
+    el('button', { type: 'button', id: 'c-cond', class: 'wide-btn', onclick: openConditions }, el('span', {}, 'Cambia le condizioni'), icon('go', 16)),
   );
   drawList();
 }
 
-function itemCard(mode, row, state) {
+function compactItem(mode, row, state, choose) {
   const out = compute(mode, row, state.values);
-  const lines = out ? mode.mostra.map(cell => {
-    const value = cell.prezzo ? out.prezzi[cell.prezzo] : row.col[cell.col];
-    return el('div', { class: cell.forte ? 'strong' : undefined }, el('span', {}, cell.t), el('span', {}, formatEuro(value)));
-  }) : [el('div', {}, el('span', {}, 'Prezzo non disponibile'))];
-  return el('article', { class: 'item' },
+  return el('button', { type: 'button', class: 'item', onclick: choose },
+    el('span', { class: 'item-main' },
+      el('b', {}, row.tit),
+      el('span', { class: 'meta' }, [row.codice, row.sub].filter(Boolean).join(' · '))),
+    el('span', { class: 'item-price' }, out ? formatEuro(out.principale) : '—'));
+}
+
+function detailCard(mode, row, state, calc) {
+  const detail = breakdown(mode, row, state.values);
+  const head = [
     el('h3', {}, row.tit),
     el('div', { class: 'meta' }, [row.codice, row.sub].filter(Boolean).join(' · ')),
     row.gruppo ? el('div', { class: 'meta' }, row.gruppo) : null,
     row.tag?.length ? el('div', { class: 'tags' }, row.tag.map(tag => el('span', { class: 'tag' }, tag))) : null,
-    el('div', { class: 'prices' }, lines),
-    out ? el('p', { class: 'muted' }, 'Sconto effettivo ' + formatPct(out.scontoPct)) : null,
-    out ? el('button', {
+  ];
+  if (!detail) return el('article', { class: 'item selected', 'data-code': row.codice }, head, el('p', { class: 'sub' }, 'Prezzo non disponibile per questo articolo.'));
+
+  const blocks = detail.blocks.map(block => el('div', { class: 'bd' },
+    el('div', { class: 'bd-base' }, el('span', {}, block.base.label), el('span', { class: 'val' }, formatEuro(block.base.value))),
+    block.items.map(item => (item.kind === 'line'
+      ? el('div', { class: 'bd-line' }, el('span', {}, item.label), el('span', { class: 'pct' }, item.pct === null ? 'a pezzo' : '−' + formatPct(item.pct)), el('span', { class: 'eur' }, minus(item.eur)))
+      : el('div', { class: 'bd-sub' }, el('span', {}, item.label), el('span', { class: 'pct' }, '−' + formatPct(item.pct)), el('span', { class: 'val' }, formatEuro(item.value)))))));
+  const firstBase = detail.blocks[0].base.value;
+
+  return el('article', { class: 'item selected', 'data-code': row.codice },
+    head,
+    el('div', { class: 'big-net' }, el('span', { class: 'net' }, formatEuro(detail.netto)), el('span', { class: 'net-pill' }, '−' + formatPct(detail.scontoPct))),
+    blocks,
+    el('p', { class: 'note' }, 'Percentuali sommate e applicate alla base, poi gli importi a pezzo. Compaiono solo le voci diverse da zero.'),
+    el('p', { class: 'note' }, `1% di questa base = ${formatEuro(firstBase / 100)}${calc.notaUnPct ? ' (' + calc.notaUnPct + ')' : ''}`),
+    el('button', {
       type: 'button',
-      class: 'btn add',
+      class: 'btn primary add',
       onclick: () => {
+        const out = compute(mode, row, state.values);
         const channel = mode.canali.find(c => c.id === state.channel);
         const line = proposalLine({
           codice: row.codice,
@@ -163,9 +206,11 @@ function itemCard(mode, row, state) {
         });
         const items = [...(getState(S.doc, PROPOSAL_KEY) ?? []), line];
         commit(doc => setState(doc, PROPOSAL_KEY, items), { render: false }).catch(() => {});
+        const counter = document.querySelector('#c-prop .count') ?? document.getElementById('c-prop').appendChild(el('span', { class: 'count' }));
+        counter.textContent = String(items.length);
         toast('Aggiunto alla proposta.');
       },
-    }, '+ Proposta') : null);
+    }, icon('plus', 18), 'Aggiungi alla proposta'));
 }
 
 export function renderProposal(view) {
@@ -174,15 +219,19 @@ export function renderProposal(view) {
   put(view, el('h1', {}, 'Proposta al cliente'));
   if (!items.length) {
     put(view, el('p', { class: 'sub' }, 'Nessun articolo. Aggiungili dal calcolatore: ogni riga conserva le condizioni con cui l\'hai inserita.'),
-      el('a', { class: 'row tool', href: '#/calc' }, el('div', { class: 'grow' }, el('b', {}, 'Vai al calcolatore')), el('i', { class: 'go' }, '›')));
+      el('a', { class: 'row tool', href: '#/calc' }, el('div', { class: 'grow' }, el('b', {}, 'Vai al calcolatore')), icon('go', 18)));
     return;
   }
-  const total = el('p', { id: 'p-total', class: 'summary' });
+  const total = el('div', { id: 'p-total', class: 'total-card' });
   const redraw = () => {
     const t = proposalTotals(items);
     clear(total);
-    total.append(el('span', {}, 'Totale netto ', el('b', {}, formatEuro(t.netto))), el('span', {}, `${t.pezzi} pezzi · listino ${formatEuro(t.listino)} · sconto medio ${formatPct(t.scontoPct)}`));
-    if (t.haMargine) total.append(el('span', {}, 'Margine ' + formatEuro(t.margine)));
+    put(total,
+      el('span', { class: 'note' }, 'Totale netto'),
+      el('b', { class: 'total-value' }, formatEuro(t.netto)),
+      el('span', { class: 'note' }, `${t.pezzi} pezzi · listino ${formatEuro(t.listino)} · sconto medio ${formatPct(t.scontoPct)}`),
+      t.haMargine ? el('span', { class: 'note' }, 'Margine ' + formatEuro(t.margine)) : null,
+    );
   };
   const rerender = () => {
     clear(view);
@@ -302,34 +351,43 @@ export function renderQuiz(view) {
   }, FILTERS.map(([value, label]) => el('option', { value }, label)));
   filterSelect.value = quizFilter;
 
-  put(view, 
+  put(view,
     el('h1', {}, 'Ripasso'),
     el('div', { class: 'pline-grid' }, field('Ambito', ambitoSelect), field('Quali', filterSelect)),
-    el('p', { id: 'q-counts', class: 'muted' }, `Domande: ${list.length} · Sapute: ${counts.ok} · Da ripassare: ${counts.rip} · Mai viste: ${counts.nuove}`),
+    progressBar(counts, list.length),
+    el('p', { id: 'q-counts', class: 'note' }, `${list.length} domande · ${counts.ok} sapute · ${counts.rip} da ripassare · ${counts.nuove} mai viste`),
   );
   if (!currentQuestion) {
     put(view, el('p', { class: 'sub' }, 'Nessuna domanda in questa selezione.'));
     return;
   }
   const question = currentQuestion;
-  const answer = el('div', { id: 'q-answer', class: 'quiz-a', hidden: true }, inlineNodes(question.r));
+  const answer = el('div', { id: 'q-answer', class: 'quiz-a enter', hidden: true }, inlineNodes(question.r));
   const mark = value => async () => {
     await commit(doc => setState(doc, 'quiz:' + question.id, value), { render: false }).catch(() => {});
     currentQuestion = pickNext(list, statusOf, quizFilter, question.id);
     redraw();
   };
-  const verdict = el('div', { class: 'tools', hidden: true },
-    el('button', { type: 'button', id: 'q-ok', class: 'btn primary', onclick: mark('ok') }, 'Saputa'),
-    el('button', { type: 'button', id: 'q-rip', class: 'btn', onclick: mark('rip') }, 'Da ripassare'));
+  const verdict = el('div', { class: 'verdict enter', hidden: true },
+    el('button', { type: 'button', id: 'q-rip', class: 'btn amber', onclick: mark('rip') }, 'Da ripassare'),
+    el('button', { type: 'button', id: 'q-ok', class: 'btn primary', onclick: mark('ok') }, 'La sapevo'));
   const showBtn = el('button', {
     type: 'button',
     id: 'q-show',
-    class: 'btn primary',
+    class: 'btn primary big',
     onclick: () => {
       answer.hidden = false;
       verdict.hidden = false;
       showBtn.hidden = true;
     },
   }, 'Mostra la risposta');
-  put(view, el('section', { class: 'card' }, el('p', { class: 'quiz-q' }, question.q), answer, showBtn, verdict));
+  put(view, el('section', { class: 'quiz-card' }, el('p', { class: 'quiz-q' }, question.q), answer), showBtn, verdict);
+}
+
+function progressBar(counts, total) {
+  const ok = el('span', { class: 'p-ok' });
+  const rip = el('span', { class: 'p-rip' });
+  ok.style.width = (total ? (counts.ok / total) * 100 : 0) + '%';
+  rip.style.width = (total ? (counts.rip / total) * 100 : 0) + '%';
+  return el('div', { id: 'q-progress', class: 'progress', role: 'img', 'aria-label': `${counts.ok} sapute e ${counts.rip} da ripassare su ${total}` }, ok, rip);
 }

@@ -17,17 +17,25 @@
 </head>
 <body>
 <header id="top" hidden>
-  <div class="bar">
-    <button type="button" id="back" class="icon" aria-label="Indietro" hidden>‹</button>
-    <a id="title" href="#/">Manuale</a>
-    <button type="button" id="settings" class="icon" aria-label="Impostazioni">⚙</button>
-  </div>
+  <button type="button" id="back" class="round press" aria-label="Indietro"></button>
+  <p id="sync-line" class="sync"><span class="dot"></span><span id="sync-text"></span></p>
+  <span class="grow"></span>
+  <button type="button" id="search-btn" class="round press" aria-label="Cerca"></button>
+  <button type="button" id="settings" class="round press" aria-label="Impostazioni"></button>
+  <h1 id="home-title">Cosa non<br>ricordi?</h1>
   <form id="search-form" class="searchbar" role="search" autocomplete="off">
-    <input type="search" id="q" name="ricerca" placeholder="Cosa non ricordi?" aria-label="Cerca nel manuale" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+    <span id="search-icon"></span>
+    <input type="search" id="q" name="ricerca" placeholder="Cerca nel manuale" aria-label="Cerca nel manuale" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
   </form>
 </header>
 <div id="banner" role="alert" hidden></div>
 <main id="view"></main>
+<nav id="tabs" aria-label="Navigazione principale" hidden>
+  <a href="#/" data-tab="home"><span class="pill"></span>Home</a>
+  <a href="#/cerca" data-tab="cerca"><span class="pill"></span>Cerca</a>
+  <a href="#/ripasso" data-tab="ripasso"><span class="pill"></span>Ripasso</a>
+  <a href="#/calc" data-tab="calc"><span class="pill"><span id="tab-badge" hidden></span></span>Proposta</a>
+</nav>
 <dialog id="sheet" aria-labelledby="sheet-title"></dialog>
 <div id="toast" role="status" hidden></div>
 <noscript>Per usare il manuale serve JavaScript.</noscript>
