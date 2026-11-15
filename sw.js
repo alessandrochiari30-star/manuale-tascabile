@@ -1,5 +1,5 @@
 // Tiene in cache solo il guscio dell'app: nessun contenuto del manuale passa da qui.
-const VERSION = 'mt-520b0dcfb09c';
+const VERSION = 'mt-8369d604cf4d';
 const ASSETS = [
   './',
   './icons/icon-180.png',
@@ -8,6 +8,7 @@ const ASSETS = [
   './index.html',
   './js/app.js',
   './js/calc.js',
+  './js/cleanup.js',
   './js/doc.js',
   './js/edit.js',
   './js/entries.js',

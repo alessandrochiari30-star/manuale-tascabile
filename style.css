@@ -270,6 +270,11 @@ h2 { font-size: 17px; margin: 22px 0 8px; }
 .res.dubbio .res-foot { color: var(--amber-ink); }
 .res .edit { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 40px; padding: 0; border-radius: 12px; color: var(--ink); }
 .res.dubbio .edit { color: var(--amber-ink); }
+/* Ripetizioni di un risultato: un bottone sotto la scheda, l'elenco rientrato quando si apre. */
+.same { margin: -4px 0 14px; }
+.same-more { height: 40px; padding: 0 14px; border: 0; border-radius: 999px; background: var(--field); color: var(--ink-2); font-size: 13.5px; font-weight: 650; }
+.same-list { margin: 10px 0 0 6px; padding-left: 10px; border-left: 2px solid var(--card-line); }
+.same-list .res:last-child { margin-bottom: 0; }
 @keyframes mark-glow { from { background: #FFD27A; } to { background: var(--mark); } }
 mark { background: var(--mark); color: var(--mark-ink); border-radius: 3px; padding: 0 2px; }
 mark { animation: mark-glow 1.1s ease-out both; }

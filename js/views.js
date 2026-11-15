@@ -1,7 +1,7 @@
 // Schermate di consultazione: home, ambito, sezione, ricerca, dubbi e impostazioni.
 import { el, put, inlineNodes, sourcesLine, field, armButton, toast, secretForm } from './ui.js';
 import { childrenOf, countDescendants, breadcrumb, getState, setState } from './doc.js';
-import { search } from './search.js';
+import { search, collapse, splitByCoverage } from './search.js';
 import { entryText } from './entries.js';
 import { snippet } from './forms.js';
 import { plainText } from './inline.js';
@@ -12,8 +12,9 @@ import { cleanGroups, groupHits, countHits } from './groups.js';
 import { stagger } from './motion.js';
 import { icon } from './icons.js';
 import { addRecent } from './recent.js';
-import { facets, filterResults, kindOf } from './facets.js';
+import { facets, filterResults, kindOf, activeFacet } from './facets.js';
 import { openEditor, openNew } from './edit.js';
+import { cleanFixes, applyFixes, undoFixes, lastCleanup } from './cleanup.js';
 
 const fonti = () => S.doc.meta?.fonti ?? {};
 const nav = hash => { location.hash = hash; };
@@ -377,6 +378,25 @@ function resultCard(node, words, query = '') {
       node.ty === 'link' ? null : el('button', { type: 'button', class: 'edit', 'aria-label': 'Modifica', onclick: () => openEditor(node.id) }, icon('pencil', 18))));
 }
 
+// Le ripetizioni di un risultato: chiuse finché non servono, disegnate solo all'apertura.
+function sameBlock(same, query) {
+  const list = el('div', { class: 'same-list', hidden: true });
+  const label = same.length === 1 ? '+1 simile' : `+${same.length} simili`;
+  const toggle = el('button', {
+    type: 'button',
+    class: 'same-more',
+    'aria-expanded': 'false',
+    onclick: () => {
+      const open = list.hidden;
+      if (open && !list.children.length) put(list, same.map(r => resultCard(S.doc.nodes[r.id], r.words, query)));
+      list.hidden = !open;
+      toggle.setAttribute('aria-expanded', String(open));
+      toggle.textContent = open ? 'Nascondi i simili' : label;
+    },
+  }, label);
+  return el('div', { class: 'same' }, toggle, list);
+}
+
 export function renderSearch(view, query, kind = 'tutto') {
   if (!query.trim()) {
     put(view, el('p', { class: 'sub' }, 'Scrivi una parola, anche a metà: cerco in tutto il manuale.'));
@@ -387,8 +407,15 @@ export function renderSearch(view, query, kind = 'tutto') {
     put(view, el('p', { class: 'sub' }, `Nessun risultato per «${query}». Prova con meno parole o con un'altra parola.`));
     return;
   }
-  const chips = facets(all, S.doc.nodes);
-  const active = chips.some(c => c.key === kind) ? kind : 'tutto';
+  // Le voci che ripetono un risultato già in elenco finiscono sotto di lui, in «+N simili».
+  // Una voce con dei figli è un titolo che porta ad altro: resta sempre in elenco.
+  const MERGE = new Set(['pt', 'num', 'qa']);
+  const mergeable = r => MERGE.has(S.doc.nodes[r.id]?.ty) && !childrenOf(S.tree, r.id).length;
+  const { best, rest } = splitByCoverage(all);
+  const group = (list, key) => collapse(S.index, filterResults(list, S.doc.nodes, key), mergeable);
+  const grouped = key => group(best, key);
+  const chips = facets(best, S.doc.nodes).map(chip => ({ ...chip, count: grouped(chip.key).length }));
+  const active = activeFacet(chips, kind);
   const base = `#/cerca?q=${encodeURIComponent(query)}`;
   put(view, el('div', { class: 'facets', role: 'group', 'aria-label': 'Filtra per tipo' }, chips.map(chip => el('a', {
     class: 'facet',
@@ -396,14 +423,31 @@ export function renderSearch(view, query, kind = 'tutto') {
     'data-key': chip.key,
     'aria-current': chip.key === active ? 'true' : 'false',
   }, chip.label, el('span', {}, String(chip.count))))));
-  const shown = filterResults(all, S.doc.nodes, active).slice(0, 60);
-  const cards = [];
-  for (const result of shown) {
-    const node = S.doc.nodes[result.id];
-    if (node) cards.push(resultCard(node, result.words, query));
-  }
+  const cardsOf = groups => {
+    const out = [];
+    for (const result of groups.slice(0, 60)) {
+      const node = S.doc.nodes[result.id];
+      if (!node) continue;
+      out.push(resultCard(node, result.words, query));
+      const same = result.same.filter(r => S.doc.nodes[r.id]);
+      if (same.length) out.push(sameBlock(same, query));
+    }
+    return out;
+  };
+  const cards = cardsOf(grouped(active));
   stagger(cards.slice(0, 10), 25);
   put(view, cards);
+  // Le voci con una parte sola delle parole cercate: a richiesta, in fondo.
+  const loose = group(rest, active);
+  if (loose.length) {
+    const more = el('button', {
+      type: 'button',
+      id: 'res-more',
+      class: 'btn',
+      onclick: () => more.replaceWith(el('p', { class: 'label' }, 'Meno precisi'), ...cardsOf(loose)),
+    }, loose.length === 1 ? 'Mostra un altro risultato meno preciso' : `Mostra altri ${Math.min(loose.length, 60)} risultati meno precisi`);
+    put(view, more);
+  }
 }
 
 function doubtNodes() {
@@ -535,6 +579,39 @@ export function renderSettings(view) {
     },
   }, 'Carica i gruppi');
 
+  const fixed = n => (n === 1 ? '1 voce sistemata' : `${n} voci sistemate`);
+  const skipped = n => (n ? (n === 1 ? ' 1 saltata perché modificata nel frattempo.' : ` ${n} saltate perché modificate nel frattempo.`) : '');
+  const cleanFile = el('input', { id: 'set-clean', type: 'file', accept: '.json,application/json' });
+  const cleanErr = el('div', { class: 'err', hidden: true, role: 'alert' });
+  const cleanGo = el('button', {
+    type: 'button',
+    id: 'set-clean-go',
+    class: 'btn',
+    onclick: async () => {
+      cleanErr.hidden = true;
+      try {
+        const file = cleanFile.files?.[0];
+        if (!file) throw new Error('Scegli prima il file.');
+        let data;
+        try { data = JSON.parse(await file.text()); } catch { throw new Error('Il file non si legge: è quello giusto?'); }
+        const fixes = cleanFixes(data);
+        if (!fixes.length) throw new Error('Nel file non ci sono correzioni.');
+        let out;
+        await commit(doc => { out = applyFixes(doc, fixes); });
+        toast(`${fixed(out.fatte)}.${skipped(out.saltate)}`);
+      } catch (err) {
+        cleanErr.textContent = err.message;
+        cleanErr.hidden = false;
+      }
+    },
+  }, 'Applica la pulizia');
+  const cleaned = lastCleanup(S.doc);
+  const cleanUndo = cleaned ? armButton(el('button', { type: 'button', id: 'set-clean-undo', class: 'btn' }, 'Annulla l\'ultima pulizia'), 'Conferma: rimetti tutto', async () => {
+    let out;
+    await commit(doc => { out = undoFixes(doc); });
+    toast(`${out.fatte === 1 ? '1 voce rimessa' : `${out.fatte} voci rimesse`} com'era prima.${skipped(out.saltate)}`);
+  }) : null;
+
   put(view,
     el('h1', {}, 'Impostazioni'),
     el('section', { class: 'card' }, el('h2', {}, 'Sincronizzazione'), status, syncBtn),
@@ -547,6 +624,12 @@ export function renderSettings(view) {
       el('h2', {}, 'Gruppi per cliente e canale'),
       el('p', { class: 'note', id: 'set-groups-now' }, groupsNow ? `Ora ci sono ${groupsNow} gruppi. Per cambiarli carica un file nuovo.` : 'Nessun gruppo caricato.'),
       field('File dei gruppi', groupFile), groupErr, groupGo),
+    el('section', { class: 'card' },
+      el('h2', {}, 'Pulizia dei doppioni'),
+      el('p', { class: 'note', id: 'set-clean-now' }, cleaned
+        ? `Ultima pulizia: ${fixed(cleaned.voci)} il ${new Date(cleaned.quando).toLocaleDateString('it-IT')}.`
+        : 'Toglie le informazioni ripetute in più punti e le lascia dove servono. Le voci che hai modificato tu non vengono toccate.'),
+      field('File della pulizia', cleanFile), cleanErr, el('div', { class: 'tools' }, cleanGo, cleanUndo)),
     el('section', { class: 'card' },
       el('h2', {}, 'Copie di sicurezza'),
       el('p', { class: 'note' }, 'Il file cifrato si apre solo con la password. Il file leggibile contiene tutto in chiaro: tienilo solo sul tuo PC e non condividerlo.'),

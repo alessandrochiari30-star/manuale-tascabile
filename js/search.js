@@ -23,7 +23,7 @@ export function buildIndex(entries) {
       vocab.get(word).push(idx);
     }
   });
-  return { entries, vocab, titles };
+  return { entries, vocab, titles, ids: new Map(entries.map((entry, idx) => [entry.id, idx])), profiles: new Map() };
 }
 
 // Un testo lungo contiene più parole per caso: pesa meno di una voce breve e mirata.
@@ -122,4 +122,56 @@ export function search(index, query, { limit = 60, synonyms = [] } = {}) {
   }
   results.sort((x, y) => y.matched - x.matched || y.score - x.score || x.length - y.length || x.idx - y.idx);
   return results.slice(0, limit).map(({ id, score, matched, words }) => ({ id, score, matched, words }));
+}
+
+// --- risultati precisi e meno precisi ---
+// Cercando più parole, contano le voci che le contengono tutte (o il massimo che si trova).
+// Quelle con una parte sola delle parole restano a disposizione, ma a parte.
+export function splitByCoverage(results) {
+  const top = results.reduce((max, result) => Math.max(max, result.matched), 0);
+  return { best: results.filter(result => result.matched === top), rest: results.filter(result => result.matched !== top) };
+}
+
+// --- risultati ripetuti ---
+// La stessa informazione sta spesso in più punti del manuale (un argomento, un numero,
+// una scheda). In elenco ne resta una, la prima; le altre si aprono da «+N simili».
+const INSIDE = 0.85; // quanta parte della voce più corta sta in quella più lunga
+const ALIKE = 0.4;   // e quanto le due voci si somigliano nel complesso
+const MIN_WORDS = 3;
+
+const rarity = (index, word) => Math.log(1 + index.entries.length / (index.vocab.get(word)?.length ?? 1));
+
+function profile(index, id) {
+  let found = index.profiles.get(id);
+  if (!found) {
+    const set = new Set(tokenize(index.entries[index.ids.get(id)]?.text).filter(word => hasDigit(word) || (!STOP.has(word) && word.length > 1)));
+    let weight = 0;
+    for (const word of set) weight += rarity(index, word);
+    found = { set, weight };
+    index.profiles.set(id, found);
+  }
+  return found;
+}
+
+function repeats(index, a, b) {
+  const [small, large] = a.weight <= b.weight ? [a, b] : [b, a];
+  if (small.set.size < MIN_WORDS) return false;
+  let shared = 0;
+  for (const word of small.set) {
+    if (large.set.has(word)) shared += rarity(index, word);
+    // Un numero che cambia è un'altra informazione: «bonus 2%» non ripete «bonus 4%».
+    else if (hasDigit(word)) return false;
+  }
+  return shared / small.weight >= INSIDE && shared / (small.weight + large.weight - shared) >= ALIKE;
+}
+
+export function collapse(index, results, canMerge = () => true) {
+  const groups = [];
+  for (const result of results) {
+    const own = canMerge(result) ? profile(index, result.id) : null;
+    const home = own && groups.find(group => group.own && repeats(index, own, group.own));
+    if (home) home.same.push(result);
+    else groups.push({ result, own, same: [] });
+  }
+  return groups.map(({ result, same }) => ({ ...result, same }));
 }
