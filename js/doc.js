@@ -82,6 +82,18 @@ export function restoreNode(doc, id, now = Date.now()) {
   doc.nodes[id] = { ...rest, upd: tick(prev, now) };
 }
 
+// Sposta una voce (con tutto ciò che ha sotto) in un altro punto. Senza `ord` va in fondo.
+export function moveNode(doc, id, parentId, now = Date.now(), ord = undefined) {
+  const prev = need(doc, id);
+  need(doc, parentId);
+  for (let at = parentId; at !== null && at !== undefined; at = doc.nodes[at]?.par) {
+    if (at === id) throw new Error('Una voce non può finire sotto se stessa: ' + id);
+  }
+  const last = Object.values(doc.nodes).reduce((max, n) => (n.par === parentId && n.id !== id ? Math.max(max, n.ord ?? 0) : max), -1);
+  doc.nodes[id] = { ...prev, par: parentId, ord: ord ?? last + 1, upd: tick(prev, now) };
+  return doc.nodes[id];
+}
+
 export function setState(doc, key, val, now = Date.now()) {
   doc.state[key] = { val, upd: tick(doc.state[key], now) };
 }

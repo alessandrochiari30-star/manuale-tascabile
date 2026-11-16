@@ -1,5 +1,5 @@
 // Tiene in cache solo il guscio dell'app: nessun contenuto del manuale passa da qui.
-const VERSION = 'mt-8369d604cf4d';
+const VERSION = 'mt-f6030a2fc6fc';
 const ASSETS = [
   './',
   './icons/icon-180.png',
